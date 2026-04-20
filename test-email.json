@@ -1,0 +1,8 @@
+{
+  "toEmail": "amineayedd2012@gmail.com",
+  "subject": "Test Email",
+  "message": "Ceci est un test d'alerte",
+  "type": "critical",
+  "level": 15,
+  "timestamp": "2026-04-16T10:00:00Z"
+}
