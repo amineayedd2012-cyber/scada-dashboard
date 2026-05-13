@@ -4,6 +4,18 @@ export const emailService = {
   // Envoyer une alerte par email
   sendAlert: async (email, alert) => {
     try {
+      // FIX: Sujet adapté selon le type d'alerte
+      //   - critical → 🔴 URGENT
+      //   - warning  → 🟠 Attention
+      let subject;
+      if (alert.type === 'critical') {
+        subject = `🔴 URGENT - Bassin Sartex: ${alert.message}`;
+      } else if (alert.type === 'warning') {
+        subject = `🟠 Attention - Bassin Sartex: ${alert.message}`;
+      } else {
+        subject = `🚨 Alerte Bassin Sartex: ${alert.message}`;
+      }
+
       const response = await fetch('http://localhost:3001/api/send-alert', {
         method: 'POST',
         headers: {
@@ -11,7 +23,7 @@ export const emailService = {
         },
         body: JSON.stringify({
           toEmail: email,
-          subject: `🚨 Alerte BassinAI: ${alert.message}`,
+          subject: subject,
           message: alert.message,
           type: alert.type,
           level: alert.level,

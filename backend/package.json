@@ -1,7 +1,7 @@
 {
   "name": "water-basin-backend",
   "version": "1.0.0",
-  "description": "Backend Express pour BassinAI avec alertes email",
+  "description": "Backend Express pour Bassin Sartex avec alertes email",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

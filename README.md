@@ -1,4 +1,4 @@
-# 🌊 BassinAI - Dashboard Supervision Bassins d'Eau
+# 🌊 Bassin Sartex - Dashboard Supervision Bassins d'Eau
 
 **Système professionnel de supervision en temps réel des bassins d'eau industriels**
 
@@ -47,7 +47,7 @@ Ce projet crée un **dashboard professionnel** pour superviser des bassins d'eau
 
 ```
 ┌────────────────────────────────────────────┐
-│  BassinAI Dashboard                Logout  │
+│  Bassin Sartex Dashboard                Logout  │
 ├────────────────────────────────────────────┤
 │                                            │
 │  📊 Niveau d'eau    💧 Débit entrant       │

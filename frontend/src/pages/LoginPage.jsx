@@ -17,12 +17,12 @@ export default function LoginPage() {
     setError('');
 
     // Simulation: vérifier admin
-    if (email === 'amineayedd2012@gmail.com' && password === '0044') {
+    if (email === 'chneneahmed460@gmail.com' && password === '0044') {
       localStorage.setItem('userRole', 'admin');
       localStorage.setItem('userName', 'Administrateur');
       navigate('/dashboard');
     } else {
-      setError('❌ Email ou mot de passe incorrect (essayez: amineayedd2012@gmail.com / 0044)');
+      setError('❌ Email ou mot de passe incorrect (essayez: chneneahmed460@gmail.com / 0044)');
     }
     setLoading(false);
   };
@@ -49,7 +49,7 @@ export default function LoginPage() {
         <div className="text-center mb-12">
           <div className="flex items-center justify-center mb-4">
             <Droplets className="w-12 h-12 text-blue-400 mr-3" />
-            <h1 className="text-4xl font-bold text-white">BassinAI</h1>
+            <h1 className="text-4xl font-bold text-white">Bassin Sartex</h1>
           </div>
           <p className="text-gray-400 text-lg">Système de supervision des bassins d'eau en temps réel</p>
         </div>
@@ -104,7 +104,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
-                  placeholder="admin@example.com"
+                  placeholder="chneneahmed460@gmail.com"
                 />
               </div>
 
@@ -149,7 +149,7 @@ export default function LoginPage() {
 
         {/* Footer */}
         <p className="text-center text-gray-500 text-sm mt-8">
-          © 2025 BassinAI - Système de supervision industrielle
+          © 2025 Bassin Sartex - Système de supervision industrielle
         </p>
       </div>
 

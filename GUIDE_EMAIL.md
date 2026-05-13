@@ -83,7 +83,7 @@ const handleAlertGenerated = async (alert) => {
   setAlerts(prev => [alert, ...prev].slice(0, 5));
   
   // Envoyer par email
-  const userEmail = localStorage.getItem('userEmail') || 'amineayedd2012@gmail.com';
+  const userEmail = localStorage.getItem('userEmail') || 'chneneahmed460@gmail.com';
   await emailService.sendAlert(userEmail, alert);
 };
 ```

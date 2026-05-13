@@ -4,12 +4,93 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer
 } from 'recharts';
-import { Droplets, Activity, AlertTriangle, LogOut, TrendingUp, Clock, FlaskConical } from 'lucide-react';
+import { Droplets, Activity, AlertTriangle, LogOut, TrendingUp, Clock, FlaskConical, Menu, X } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { emailService } from '../services/emailService';
 import io from 'socket.io-client';
- 
+
+// =============================================
+// SEUILS CONFIGURABLES — Modifier ici pour ajuster les plages
+// =============================================
+// Logique:
+//   < 20%             → ROUGE   (CRITIQUE) + email
+//   20% – 30%         → ORANGE  (ATTENTION proche du seuil bas) + email
+//   30% – 70%         → VERT    (NORMAL) — pas d'email
+//   70% – 80%         → ORANGE  (ATTENTION proche du seuil haut) + email
+//   > 80%             → ROUGE   (CRITIQUE) + email
+// =============================================
+const SEUILS = {
+  CRITIQUE_BAS  : 20,   // En dessous = ROUGE
+  ATTENTION_BAS : 30,   // Entre 20 et 30 = ORANGE
+  NORMAL_MIN    : 30,   // Entre 30 et 70 = VERT
+  NORMAL_MAX    : 70,
+  ATTENTION_HAUT: 80,   // Entre 70 et 80 = ORANGE
+  CRITIQUE_HAUT : 80    // Au-dessus de 80 = ROUGE
+};
+
+// =============================================
+// Fonction unique qui détermine l'état du bassin
+// Retourne: { etat: 'normal'|'attention'|'critique', message: string, color, bg }
+// =============================================
+function evaluerEtatBassin(niveau) {
+  if (niveau < SEUILS.CRITIQUE_BAS) {
+    return {
+      etat: 'critique',
+      status: 'CRITIQUE',
+      message: `🔴 CRITIQUE: Niveau très bas (${niveau.toFixed(1)}%) - Risque arrêt production!`,
+      emailMessage: `Niveau d'eau critique: ${niveau.toFixed(1)}% - Inférieur à ${SEUILS.CRITIQUE_BAS}% - Risque arrêt production!`,
+      color: 'text-red-500',
+      bg: 'bg-red-500/10',
+      type: 'critical'
+    };
+  }
+  if (niveau < SEUILS.ATTENTION_BAS) {
+    return {
+      etat: 'attention',
+      status: 'ATTENTION',
+      message: `🟠 ATTENTION: Niveau proche du seuil bas (${niveau.toFixed(1)}%)`,
+      emailMessage: `Niveau d'eau bas: ${niveau.toFixed(1)}% - Proche du seuil critique (${SEUILS.CRITIQUE_BAS}%) - À surveiller`,
+      color: 'text-orange-500',
+      bg: 'bg-orange-500/10',
+      type: 'warning'
+    };
+  }
+  if (niveau <= SEUILS.NORMAL_MAX) {
+    return {
+      etat: 'normal',
+      status: 'NORMAL',
+      message: null,
+      emailMessage: null,
+      color: 'text-green-500',
+      bg: 'bg-green-500/10',
+      type: 'normal'
+    };
+  }
+  if (niveau <= SEUILS.ATTENTION_HAUT) {
+    return {
+      etat: 'attention',
+      status: 'ATTENTION',
+      message: `🟠 ATTENTION: Niveau proche du seuil haut (${niveau.toFixed(1)}%)`,
+      emailMessage: `Niveau d'eau élevé: ${niveau.toFixed(1)}% - Proche du seuil critique (${SEUILS.CRITIQUE_HAUT}%) - À surveiller`,
+      color: 'text-orange-500',
+      bg: 'bg-orange-500/10',
+      type: 'warning'
+    };
+  }
+  // > SEUILS.CRITIQUE_HAUT
+  return {
+    etat: 'critique',
+    status: 'CRITIQUE',
+    message: `🔴 CRITIQUE: Niveau très élevé (${niveau.toFixed(1)}%) - Risque débordement!`,
+    emailMessage: `Niveau d'eau critique: ${niveau.toFixed(1)}% - Supérieur à ${SEUILS.CRITIQUE_HAUT}% - Risque débordement!`,
+    color: 'text-red-500',
+    bg: 'bg-red-500/10',
+    type: 'critical'
+  };
+}
+
 export default function Dashboard() {
+  const [menuOpen, setMenuOpen] = useState(false);
   const [userRole, setUserRole]           = useState('user');
   const [userName, setUserName]           = useState('');
   const [level, setLevel]                 = useState(65);
@@ -18,26 +99,24 @@ export default function Dashboard() {
   const [alerts, setAlerts]               = useState([]);
   const [chartData, setChartData]         = useState([]);
   const [recommendations, setRecommendations] = useState([]);
-  const [connected, setConnected]         = useState(false); // FIX: état connexion visible
-  const [lastUpdate, setLastUpdate]       = useState(null);  // FIX: timestamp dernière donnée
- 
+  const [connected, setConnected]         = useState(false);
+  const [lastUpdate, setLastUpdate]       = useState(null);
+
   const lastEmailSentAtRef = useRef(0);
- 
-  // FIX: handleRealTimeData déclarée avec useCallback pour éviter les stale closures
+
   const handleRealTimeData = useCallback(async (data) => {
     const { level: newLevel, inflow: newInflow, outflow: newOutflow } = data;
- 
-    // FIX: Vérification que les valeurs sont bien des nombres
+
     if (typeof newLevel !== 'number' || typeof newInflow !== 'number' || typeof newOutflow !== 'number') {
       console.error('❌ Données invalides reçues:', data);
       return;
     }
- 
+
     setLevel(newLevel);
     setInflow(newInflow);
     setOutflow(newOutflow);
-    setLastUpdate(new Date().toLocaleTimeString()); // FIX: Horodatage de la dernière mise à jour
- 
+    setLastUpdate(new Date().toLocaleTimeString());
+
     setChartData(prev => [
       ...prev.slice(-19),
       {
@@ -47,112 +126,131 @@ export default function Dashboard() {
         outflow: parseFloat(newOutflow.toFixed(1))
       }
     ]);
- 
-    // Alertes + emails
-    const newAlerts  = [];
-    const userEmail  = localStorage.getItem('userEmail') || 'amineayedd2012@gmail.com';
-    const now        = Date.now();
-    const COOLDOWN   = 60000;
+
+    // =====================================================
+    // NOUVELLE LOGIQUE D'ALERTES — Basée UNIQUEMENT sur le niveau
+    // Plus de comparaison inflow vs outflow
+    // =====================================================
+    const etat = evaluerEtatBassin(newLevel);
+    const newAlerts = [];
+    const userEmail = localStorage.getItem('userEmail') || 'chneneahmed460@gmail.com';
+    const now = Date.now();
+    const COOLDOWN = 60000; // 1 minute entre 2 emails
     const canSendEmail = now - lastEmailSentAtRef.current > COOLDOWN;
- 
-    const trySendEmail = async (message, type) => {
-      if (type === 'critical')      toast.error(message,   { toastId: message });
-      else if (type === 'warning')  toast.warning(message, { toastId: message });
-      else                          toast.info(message,    { toastId: message });
- 
-      if (!canSendEmail) return;
- 
-      try {
-        await emailService.sendAlert(userEmail, { message, type, level: newLevel });
-        lastEmailSentAtRef.current = Date.now();
-        toast.success('📧 Alerte email envoyée');
-      } catch (err) {
-        console.warn('Email non envoyé:', err.message);
-        // FIX: Ne pas afficher d'erreur toast pour chaque échec email (spam)
+
+    // Affichage du toast + ajout dans la liste des alertes
+    // UNIQUEMENT pour orange (attention) et rouge (critique)
+    if (etat.etat === 'critique') {
+      newAlerts.push({
+        type: 'critical',
+        message: etat.message,
+        level: newLevel,
+        time: new Date().toLocaleTimeString()
+      });
+      toast.error(etat.message, { toastId: etat.message });
+
+      // Envoi email pour CRITIQUE
+      if (canSendEmail) {
+        try {
+          await emailService.sendAlert(userEmail, {
+            message: etat.emailMessage,
+            type: 'critical',
+            level: newLevel
+          });
+          lastEmailSentAtRef.current = Date.now();
+          toast.success('📧 Alerte critique envoyée par email');
+        } catch (err) {
+          console.warn('Email non envoyé:', err.message);
+        }
       }
-    };
- 
-    if (newLevel < 20) {
-      newAlerts.push({ type: 'critical', message: '🔴 CRITIQUE: Niveau très bas! < 20%', level: newLevel, time: new Date().toLocaleTimeString() });
-      trySendEmail(`Niveau d'eau critique: ${newLevel.toFixed(1)}% - Risque arrêt production!`, 'critical');
-    } else if (newLevel > 90) {
-      newAlerts.push({ type: 'critical', message: '🔴 CRITIQUE: Risque débordement! > 90%', level: newLevel, time: new Date().toLocaleTimeString() });
-      trySendEmail(`Niveau d'eau critique: ${newLevel.toFixed(1)}% - Risque débordement!`, 'critical');
-    } else if (newLevel < 40) {
-      newAlerts.push({ type: 'warning', message: "🟠 ATTENTION: Niveau d'eau bas < 40%", level: newLevel, time: new Date().toLocaleTimeString() });
-      trySendEmail(`Niveau d'eau bas: ${newLevel.toFixed(1)}% - À surveiller`, 'warning');
+    } else if (etat.etat === 'attention') {
+      newAlerts.push({
+        type: 'warning',
+        message: etat.message,
+        level: newLevel,
+        time: new Date().toLocaleTimeString()
+      });
+      toast.warning(etat.message, { toastId: etat.message });
+
+      // Envoi email pour ATTENTION (orange)
+      if (canSendEmail) {
+        try {
+          await emailService.sendAlert(userEmail, {
+            message: etat.emailMessage,
+            type: 'warning',
+            level: newLevel
+          });
+          lastEmailSentAtRef.current = Date.now();
+          toast.success('📧 Alerte attention envoyée par email');
+        } catch (err) {
+          console.warn('Email non envoyé:', err.message);
+        }
+      }
     }
- 
-    if (newOutflow > newInflow) {
-      newAlerts.push({ type: 'critical', message: '🔴 ANOMALIE: Débit sortie > entrée!', time: new Date().toLocaleTimeString() });
-      trySendEmail(`Anomalie débit: Sortie (${newOutflow.toFixed(1)}) > Entrée (${newInflow.toFixed(1)})`, 'critical');
-    }
- 
+    // Si NORMAL → aucune alerte, aucun email
+
     setAlerts(newAlerts.slice(0, 5));
- 
+
+    // Recommandations (informatives, n'envoient pas d'email)
     const recs = [];
-    if (newLevel < 30)                        recs.push("🔴 Activer pompe d'apport");
-    if (newLevel > 80)                        recs.push('💧 Augmenter évacuation');
-    if (newOutflow > newInflow)               recs.push('📛 Réduire consommation');
-    if (newLevel >= 40 && newLevel <= 80)     recs.push('✅ Système normal');
+    if (newLevel < SEUILS.CRITIQUE_BAS)        recs.push("🔴 Activer pompe d'apport en urgence");
+    else if (newLevel < SEUILS.ATTENTION_BAS)  recs.push("🟠 Préparer la pompe d'apport");
+    else if (newLevel > SEUILS.CRITIQUE_HAUT)  recs.push('🔴 Augmenter évacuation - URGENT');
+    else if (newLevel > SEUILS.NORMAL_MAX)     recs.push('🟠 Surveiller l\'évacuation');
+    else                                       recs.push('✅ Système normal - aucune action requise');
     setRecommendations(recs);
-  }, []); // FIX: dépendances vides car on n'utilise que des setters et des refs stables
- 
+  }, []);
+
   useEffect(() => {
     const role = localStorage.getItem('userRole') || 'user';
     const name = localStorage.getItem('userName') || 'Utilisateur';
     setUserRole(role);
     setUserName(name);
- 
+
     const socket = io('http://localhost:3001', {
       reconnection:         true,
       reconnectionAttempts: 10,
-      reconnectionDelay:    2000,   // FIX: délai avant reconnexion
+      reconnectionDelay:    2000,
     });
- 
+
     socket.on('connect', () => {
       console.log('✅ Connecté au serveur WebSocket (ID:', socket.id, ')');
       setConnected(true);
       toast.success('Connecté au serveur de données en temps réel');
     });
- 
+
     socket.on('connect_error', (err) => {
       console.error('❌ Erreur de connexion WebSocket:', err.message);
       setConnected(false);
-      // FIX: Toast seulement si vraiment déconnecté (évite spam au démarrage)
     });
- 
+
     socket.on('disconnect', (reason) => {
       console.log('❌ Déconnecté du serveur WebSocket. Raison:', reason);
       setConnected(false);
       toast.error('Déconnecté du serveur de données');
     });
- 
+
     socket.on('reconnect', (attempt) => {
       console.log(`🔄 Reconnecté après ${attempt} tentative(s)`);
       setConnected(true);
       toast.success('Reconnecté au serveur');
     });
- 
-    // FIX: Nom de l'événement "basin_data" — doit correspondre exactement à io.emit('basin_data') dans server.js
+
     socket.on('basin_data', (data) => {
       console.log('📡 Données reçues via WebSocket:', data);
       handleRealTimeData(data);
     });
- 
+
     return () => {
       socket.disconnect();
     };
   }, [handleRealTimeData]);
- 
-  // =====================
-  // FIX: Bouton de test — simule des données sans MQTT
-  // =====================
+
   const sendTestData = async () => {
     const testLevel   = Math.random() * 100;
     const testInflow  = Math.random() * 200;
     const testOutflow = Math.random() * 200;
- 
+
     try {
       const res = await fetch('http://localhost:3001/api/test/simulate', {
         method: 'POST',
@@ -168,68 +266,123 @@ export default function Dashboard() {
       toast.error('❌ Impossible de joindre le backend: ' + err.message);
     }
   };
- 
+
   const handleLogout = () => {
     localStorage.removeItem('userRole');
     localStorage.removeItem('userName');
     window.location.href = '/';
   };
- 
-  const getBasinStatus = () => {
-    if (level < 20 || level > 90) return { status: 'CRITIQUE',  color: 'text-red-500',    bg: 'bg-red-500/10' };
-    if (level < 40 || level > 70) return { status: 'ATTENTION', color: 'text-orange-500', bg: 'bg-orange-500/10' };
-    return                               { status: 'NORMAL',    color: 'text-green-500',  bg: 'bg-green-500/10' };
-  };
- 
-  const bassinStatus = getBasinStatus();
- 
+
+  // FIX: Utilise la même fonction unique pour rester cohérent partout
+  const bassinStatus = evaluerEtatBassin(level);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-black text-white p-4">
- 
+
       {/* En-tête */}
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
+      <div className="mb-8">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-2 shrink-0">
             <Droplets className="w-8 h-8 text-blue-400" />
-            BassinAI Dashboard
-          </h1>
-          <p className="text-gray-400">
-            Bienvenue {userName} ({userRole === 'admin' ? '👨‍💼 Admin' : '👤 Visiteur'})
-          </p>
- 
-          {/* FIX: Indicateur de connexion visible */}
-          <div className="flex items-center gap-2 mt-1">
+            <h1 className="text-2xl lg:text-3xl font-bold whitespace-nowrap">Bassin Sartex Dashboard</h1>
+          </div>
+
+          <div className="hidden lg:flex items-center gap-3 flex-1 justify-center">
+            <div className="flex items-center gap-2 bg-slate-800/70 border border-slate-700 rounded-lg px-3 py-1.5">
+              <span className="text-gray-400 text-xs">Débit entrée</span>
+              <span className="text-sm font-bold text-blue-400">{inflow.toFixed(1)} L/min</span>
+            </div>
+            <div className="flex items-center gap-2 bg-slate-800/70 border border-slate-700 rounded-lg px-3 py-1.5">
+              <span className="text-gray-400 text-xs">Débit sortie</span>
+              <span className="text-sm font-bold text-purple-400">{outflow.toFixed(1)} L/min</span>
+            </div>
+            <div className="flex items-center gap-2 bg-slate-800/70 border border-slate-700 rounded-lg px-3 py-1.5">
+              <span className="text-gray-400 text-xs">Système</span>
+              <span className={`text-sm font-bold ${bassinStatus.color}`}>{bassinStatus.status}</span>
+            </div>
+            <div className="flex items-center gap-2 bg-slate-800/70 border border-slate-700 rounded-lg px-3 py-1.5">
+              <Clock className="w-3 h-3 text-gray-400" />
+              <span className="text-sm font-bold text-white">{lastUpdate || '—'}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
             <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`}></span>
-            <span className="text-xs text-gray-400">
-              {connected ? '● Temps réel actif' : '● Déconnecté'}
-              {lastUpdate && connected && ` — Dernière donnée: ${lastUpdate}`}
-            </span>
+            <div className="hidden md:flex gap-2">
+              <button
+                onClick={sendTestData}
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg transition-all text-sm"
+                title="Envoyer des données de test sans capteur MQTT"
+              >
+                <FlaskConical className="w-4 h-4" />
+                Tester
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition-all"
+              >
+                <LogOut className="w-5 h-5" />
+                Déconnexion
+              </button>
+            </div>
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              className="md:hidden p-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition-all"
+            >
+              {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
           </div>
         </div>
- 
-        <div className="flex gap-2">
-          {/* FIX: Bouton test simulation */}
-          <button
-            onClick={sendTestData}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg transition-all text-sm"
-            title="Envoyer des données de test sans capteur MQTT"
-          >
-            <FlaskConical className="w-4 h-4" />
-            Tester
-          </button>
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-2 bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition-all"
-          >
-            <LogOut className="w-5 h-5" />
-            Déconnexion
-          </button>
-        </div>
+
+        {/* Menu mobile */}
+        {menuOpen && (
+          <div className="md:hidden mt-4 bg-slate-800/90 border border-slate-700 rounded-xl p-4 space-y-3 animate-fade-in">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-slate-700/50 rounded-lg p-2 text-center">
+                <p className="text-gray-400 text-xs">Débit entrée</p>
+                <p className="text-sm font-bold text-blue-400">{inflow.toFixed(1)} L/min</p>
+              </div>
+              <div className="bg-slate-700/50 rounded-lg p-2 text-center">
+                <p className="text-gray-400 text-xs">Débit sortie</p>
+                <p className="text-sm font-bold text-purple-400">{outflow.toFixed(1)} L/min</p>
+              </div>
+              <div className="bg-slate-700/50 rounded-lg p-2 text-center">
+                <p className="text-gray-400 text-xs">Système</p>
+                <p className={`text-sm font-bold ${bassinStatus.color}`}>{bassinStatus.status}</p>
+              </div>
+              <div className="bg-slate-700/50 rounded-lg p-2 text-center">
+                <p className="text-gray-400 text-xs">Mise à jour</p>
+                <p className="text-sm font-bold text-white">{lastUpdate || '—'}</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={sendTestData}
+                className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg transition-all text-sm"
+              >
+                <FlaskConical className="w-4 h-4" />
+                Tester
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition-all text-sm"
+              >
+                <LogOut className="w-5 h-5" />
+                Déconnexion
+              </button>
+            </div>
+          </div>
+        )}
+
+        <p className="text-gray-400 text-sm mt-2">
+          Bienvenue {userName} ({userRole === 'admin' ? '👨‍💼 Admin' : '👤 Visiteur'})
+          {connected ? ' — ● Temps réel actif' : ' — ● Déconnecté'}
+        </p>
       </div>
- 
+
       {/* Grille principale */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
- 
+
         {/* Card 1: Niveau d'eau */}
         <div className={`rounded-xl p-6 border border-slate-700 ${bassinStatus.bg}`}>
           <div className="flex items-center justify-between mb-4">
@@ -241,13 +394,14 @@ export default function Dashboard() {
           <div className="mt-4 bg-slate-700 rounded-full h-3 overflow-hidden">
             <div
               className={`h-full transition-all duration-700 ${
-                level < 40 ? 'bg-red-500' : level < 70 ? 'bg-orange-500' : 'bg-green-500'
+                bassinStatus.etat === 'critique' ? 'bg-red-500' :
+                bassinStatus.etat === 'attention' ? 'bg-orange-500' : 'bg-green-500'
               }`}
-              style={{ width: `${Math.min(level, 100)}%` }} // FIX: clamp à 100%
+              style={{ width: `${Math.min(level, 100)}%` }}
             ></div>
           </div>
         </div>
- 
+
         {/* Card 2: Débit entrant */}
         <div className="rounded-xl p-6 border border-slate-700 bg-blue-500/10">
           <div className="flex items-center justify-between mb-4">
@@ -257,7 +411,7 @@ export default function Dashboard() {
           <div className="text-5xl font-bold text-blue-400">{inflow.toFixed(1)}</div>
           <p className="text-gray-400 mt-2">L/min</p>
         </div>
- 
+
         {/* Card 3: Débit sortant */}
         <div className="rounded-xl p-6 border border-slate-700 bg-purple-500/10">
           <div className="flex items-center justify-between mb-4">
@@ -268,31 +422,35 @@ export default function Dashboard() {
           <p className="text-gray-400 mt-2">L/min</p>
         </div>
       </div>
- 
+
       {/* Réservoir + Graphique */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
- 
-        {/* Réservoir animé */}
+
         <div className="rounded-xl p-6 border border-slate-700 bg-slate-800/50 flex flex-col items-center">
           <h3 className="text-lg font-bold mb-4">Réservoir</h3>
           <div className="relative w-24 h-40 border-2 border-gray-400 rounded-lg overflow-hidden bg-gradient-to-t from-blue-900/50 to-slate-700">
             <div
-              className={`absolute bottom-0 w-full transition-all duration-1000 ${
-                level < 40 ? 'bg-red-500' : level < 70 ? 'bg-orange-500' : 'bg-blue-500'
-              } opacity-70`}
-              style={{ height: `${Math.min(level, 100)}%` }} // FIX: clamp à 100%
+              className={`absolute bottom-0 w-full transition-all duration-1000 opacity-70 ${
+                bassinStatus.etat === 'critique' ? 'bg-red-500' :
+                bassinStatus.etat === 'attention' ? 'bg-orange-500' : 'bg-green-500'
+              }`}
+              style={{ height: `${Math.min(level, 100)}%` }}
             ></div>
             <div className="absolute inset-0 flex items-center justify-center">
               <span className="text-white font-bold text-lg">{level.toFixed(0)}%</span>
             </div>
           </div>
+          {/* Légende des seuils */}
+          <div className="mt-4 text-xs text-gray-400 space-y-1 w-full">
+            <div className="flex items-center gap-2"><span className="w-3 h-3 bg-red-500 rounded"></span>&lt; {SEUILS.CRITIQUE_BAS}% ou &gt; {SEUILS.CRITIQUE_HAUT}%</div>
+            <div className="flex items-center gap-2"><span className="w-3 h-3 bg-orange-500 rounded"></span>{SEUILS.CRITIQUE_BAS}-{SEUILS.ATTENTION_BAS}% ou {SEUILS.NORMAL_MAX}-{SEUILS.ATTENTION_HAUT}%</div>
+            <div className="flex items-center gap-2"><span className="w-3 h-3 bg-green-500 rounded"></span>{SEUILS.NORMAL_MIN}-{SEUILS.NORMAL_MAX}% (normal)</div>
+          </div>
         </div>
- 
-        {/* Graphique niveau */}
+
         <div className="rounded-xl p-6 border border-slate-700 bg-slate-800/50 col-span-2">
           <h3 className="text-lg font-bold mb-4">Évolution du niveau (dernières mesures)</h3>
           {chartData.length === 0 ? (
-            // FIX: Message quand aucune donnée temps réel reçue
             <div className="flex items-center justify-center h-64 text-gray-500">
               <div className="text-center">
                 <p>En attente de données MQTT...</p>
@@ -319,11 +477,10 @@ export default function Dashboard() {
           )}
         </div>
       </div>
- 
+
       {/* Alertes et Recommandations */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
- 
-        {/* Alertes */}
+
         <div className="rounded-xl p-6 border border-slate-700 bg-slate-800/50">
           <div className="flex items-center gap-2 mb-4">
             <AlertTriangle className="w-6 h-6 text-orange-400" />
@@ -352,8 +509,7 @@ export default function Dashboard() {
             )}
           </div>
         </div>
- 
-        {/* Recommandations */}
+
         <div className="rounded-xl p-6 border border-slate-700 bg-slate-800/50">
           <div className="flex items-center gap-2 mb-4">
             <Clock className="w-6 h-6 text-cyan-400" />
@@ -372,8 +528,8 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
- 
-      {/* Historique ADMIN uniquement */}
+
+      {/* Historique ADMIN */}
       {userRole === 'admin' && (
         <div className="rounded-xl p-6 border border-slate-700 bg-slate-800/50 mb-8">
           <h3 className="text-lg font-bold mb-4">📊 Historique détaillé (Admin uniquement)</h3>
@@ -395,35 +551,12 @@ export default function Dashboard() {
           )}
         </div>
       )}
- 
+
       {userRole === 'user' && (
         <div className="rounded-xl p-6 border border-red-500/50 bg-red-900/20 mb-8">
           <p className="text-red-300">🔒 Accès historique refusé - Réservé à l'administrateur</p>
         </div>
       )}
- 
-      {/* Statistiques */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="rounded-lg p-4 bg-slate-800/50 border border-slate-700">
-          <p className="text-gray-400 text-sm">Consommation nette</p>
-          {/* FIX: formule corrigée — c'est outflow - inflow si sortie > entrée */}
-          <p className={`text-2xl font-bold ${outflow > inflow ? 'text-red-400' : 'text-green-400'}`}>
-            {(outflow - inflow).toFixed(1)} L/min
-          </p>
-        </div>
-        <div className="rounded-lg p-4 bg-slate-800/50 border border-slate-700">
-          <p className="text-gray-400 text-sm">Delta flux</p>
-          <p className="text-2xl font-bold">{Math.abs(inflow - outflow).toFixed(1)} L</p>
-        </div>
-        <div className="rounded-lg p-4 bg-slate-800/50 border border-slate-700">
-          <p className="text-gray-400 text-sm">État système</p>
-          <p className={`text-2xl font-bold ${bassinStatus.color}`}>{bassinStatus.status}</p>
-        </div>
-        <div className="rounded-lg p-4 bg-slate-800/50 border border-slate-700">
-          <p className="text-gray-400 text-sm">Mise à jour</p>
-          <p className="text-2xl font-bold">{lastUpdate || '—'}</p>
-        </div>
-      </div>
     </div>
   );
 }

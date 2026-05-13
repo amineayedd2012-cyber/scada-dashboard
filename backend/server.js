@@ -124,7 +124,7 @@ async function sendAutoAlert(level, reason) {
           <p>Raison: <b>${reason}</b></p>
           <p>Heure: ${new Date().toLocaleString('fr-FR')}</p>
           <hr style="border: 1px solid #334155;">
-          <p style="color: #64748b; font-size: 12px;">BassinAI - Alerte automatique</p>
+          <p style="color: #64748b; font-size: 12px;">Bassin Sartex - Alerte automatique</p>
         </div>
       `
     });
@@ -290,7 +290,7 @@ app.post('/api/send-alert', async (req, res) => {
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; padding: 20px; background: #0f172a; color: #e2e8f0;">
         <div style="max-width: 600px; margin: 0 auto; background: #1e293b; border-radius: 12px; padding: 24px; border: 1px solid #334155;">
-          <h2 style="margin-top: 0;">🌊 Alerte BassinAI</h2>
+          <h2 style="margin-top: 0;">🌊 Alerte Bassin Sartex</h2>
           <div style="padding: 15px; background: ${alertType === 'critical' ? '#450a0a' : '#451a03'}; border-left: 4px solid ${alertType === 'critical' ? '#ef4444' : '#f59e0b'}; border-radius: 0 8px 8px 0; margin: 16px 0;">
             <p style="margin: 0; font-weight: bold; color: ${alertType === 'critical' ? '#fca5a5' : '#fed7aa'};">
               ${alertType === 'critical' ? '🔴 CRITIQUE' : '🟠 ATTENTION'}
@@ -312,7 +312,7 @@ app.post('/api/send-alert', async (req, res) => {
             </tr>
           </table>
           <hr style="border: 1px solid #334155; margin: 20px 0;">
-          <p style="color: #64748b; font-size: 12px; text-align: center;">BassinAI — Système de supervision automatisé</p>
+          <p style="color: #64748b; font-size: 12px; text-align: center;">Bassin Sartex — Système de supervision automatisé</p>
         </div>
       </div>
     `;
@@ -409,7 +409,7 @@ app.use((req, res) => {
 // SERVER START
 // =====================
 server.listen(PORT, () => {
-  console.log(`\n🚀 Backend BassinAI démarré: http://localhost:${PORT}`);
+  console.log(`\n🚀 Backend Bassin Sartex démarré: http://localhost:${PORT}`);
   console.log(`📧 Email: ${process.env.EMAIL_USER || '❌ non configuré'}`);
   console.log(`🗄️  Supabase: ${supabase ? '✅ connecté' : '❌ non configuré'}`);
   console.log(`\n📋 Routes disponibles:`);
